@@ -31,14 +31,21 @@
                     </div>
                 </div>
 
-                <% if (jsonData) { %>
-                    <div class="card">
-                        <div class="card-header">转换结果</div>
-                        <div class="card-body">
-                            <pre><code class="language-json"><%= jsonData %></code></pre>
-                        </div>
+                <!-- 在结果显示区域上方添加清理信息显示 -->
+                <% if (cleanupMessage) { %>
+                    <div class="alert alert-info mt-3">
+                        <%= cleanupMessage %>
                     </div>
                     <% } %>
+
+                        <% if (jsonData) { %>
+                            <div class="card">
+                                <div class="card-header">转换结果</div>
+                                <div class="card-body">
+                                    <pre><code class="language-json"><%= jsonData %></code></pre>
+                                </div>
+                            </div>
+                            <% } %>
     </div>
 </body>
 
