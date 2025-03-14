@@ -1,0 +1,26 @@
+{
+  "name": "json-converter",
+  "version": "1.0.0",
+  "description": "Convert excel rows into JSON objects",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alickjoe/JSON-converter.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/alickjoe/JSON-converter/issues"
+  },
+  "homepage": "https://github.com/alickjoe/JSON-converter#readme",
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
+  }
+}
