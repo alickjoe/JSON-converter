@@ -2,32 +2,143 @@ const express = require('express');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const path = require('path');
-const app = express();
 const fs = require('fs');
 const { promisify } = require('util');
-const readdir = promisify(fs.readdir);
-const unlink = promisify(fs.unlink);
-const rmdir = promisify(fs.rmdir);
+const crypto = require('crypto');
+const app = express();
 
-// 配置EJS模板引擎
+// 中间件配置
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 
-// 配置静态文件目录
-//app.use(express.static('public'));
+// 辅助函数 ---------------------------------------------------
+const generateUniqueSuffix = () => {
+  return crypto.randomBytes(3).toString('hex');
+};
 
-// 配置Multer文件上传
+// 增强版结构哈希算法
+const getStructureHash = (obj) => {
+  // 处理基本类型数组的特殊标记
+  if (Array.isArray(obj) && obj.some(item => typeof item !== 'object')) {
+    return crypto.createHash('md5').update('primitive_array').digest('hex').slice(0,6);
+  }
+
+  const hashKeys = (obj) => {
+    if (Array.isArray(obj)) return obj.map(hashKeys);
+    if (typeof obj === 'object' && obj !== null) {
+      return Object.keys(obj).sort().reduce((acc, key) => {
+        acc[key] = hashKeys(obj[key]);
+        return acc;
+      }, {});
+    }
+    return typeof obj;
+  };
+  return crypto.createHash('md5').update(JSON.stringify(hashKeys(obj))).digest('hex').slice(0, 6);
+};
+
+// 优化后的工作表命名逻辑
+const generateSheetName = (fieldName, structureHash) => {
+  const base = fieldName.replace(/[\\\/:*?[\]]/g, '')
+    .replace(/_/g, '')
+    .substring(0, 20);
+  return `${base}_${structureHash}`; // 总长度<=28
+};
+
+// 改进后的核心处理函数
+const processNestedData = (data, fieldName, parentSheetNames, parentId, workbook, globalStructureMap = new Map()) => {
+  if (!data || data.length === 0) return '';
+
+  // 处理基本类型数组（字符串/数字等）
+  const isPrimitiveArray = typeof data[0] !== 'object' && !Array.isArray(data[0]);
+  if (isPrimitiveArray) {
+    const structureHash = getStructureHash(data);
+    const sheetName = generateSheetName(fieldName, structureHash);
+
+    if (!globalStructureMap.has(sheetName)) {
+      const worksheet = XLSX.utils.json_to_sheet([], {
+        header: ["parent_id", "value"]
+      });
+      globalStructureMap.set(sheetName, {
+        worksheet,
+        data: []
+      });
+    }
+
+    const currentSheet = globalStructureMap.get(sheetName);
+    data.forEach(value => {
+      const row = { parent_id: parentId, value };
+      currentSheet.data.push(row);
+      XLSX.utils.sheet_add_json(currentSheet.worksheet, [row], {
+        skipHeader: true,
+        origin: -1
+      });
+    });
+
+    if (!workbook.Sheets[sheetName]) {
+      XLSX.utils.book_append_sheet(workbook, currentSheet.worksheet, sheetName);
+    }
+    return sheetName;
+  }
+
+  // 处理对象/嵌套数组
+  const structureHash = getStructureHash(data[0]);
+  const sheetName = generateSheetName(fieldName, structureHash);
+
+  if (!globalStructureMap.has(sheetName)) {
+    globalStructureMap.set(sheetName, {
+      worksheet: XLSX.utils.json_to_sheet([]),
+      data: []
+    });
+  }
+
+  const currentSheet = globalStructureMap.get(sheetName);
+  
+  data.forEach(item => {
+    const row = { parent_id: parentId };
+    
+    Object.entries(item).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        const childRef = processNestedData(
+          value,
+          key,
+          parentSheetNames,
+          item.id || parentId,
+          workbook,
+          globalStructureMap
+        );
+        row[`${key}_ref`] = childRef;
+      } else if (typeof value === 'object' && value !== null) {
+        Object.entries(value).forEach(([subKey, subValue]) => {
+          row[`${key}_${subKey}`] = subValue;
+        });
+      } else {
+        row[key] = value;
+      }
+    });
+
+    currentSheet.data.push(row);
+    XLSX.utils.sheet_add_json(currentSheet.worksheet, currentSheet.data);
+  });
+
+  if (!workbook.Sheets[sheetName]) {
+    XLSX.utils.book_append_sheet(workbook, currentSheet.worksheet, sheetName);
+  }
+
+  return sheetName;
+};
+
+// 文件上传配置 -------------------------------------------------
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
+  destination: 'uploads/',
   filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
+    cb(null, `${Date.now()}-${file.originalname}`);
   }
 });
 
 const upload = multer({
-  storage: storage,
+  storage,
   fileFilter: (req, file, cb) => {
     if (file.mimetype.includes('excel') || file.mimetype.includes('spreadsheetml')) {
       cb(null, true);
@@ -37,82 +148,97 @@ const upload = multer({
   }
 });
 
-// 路由配置
+// 路由配置 -----------------------------------------------------
 app.get('/', (req, res) => {
   res.render('index', { jsonData: null, error: null, cleanupMessage: null });
 });
 
 app.post('/upload', upload.single('excelFile'), async (req, res) => {
   try {
-    if (!req.file) {
-      throw new Error('请选择要上传的文件');
-    }
+    if (!req.file) throw new Error('请选择要上传的文件');
 
-    // 读取Excel文件
     const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+    const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
 
-    // 转换为JSON
-    const jsonData = XLSX.utils.sheet_to_json(worksheet);
-    // 转换完成后立即清理文件
-    if (req.file) {
-      await unlink(req.file.path);
-    }
+    await promisify(fs.unlink)(req.file.path);
+
     res.render('index', {
       jsonData: JSON.stringify(jsonData, null, 2),
       error: null,
       cleanupMessage: '文件已自动清理'
     });
   } catch (error) {
+    res.render('index', { jsonData: null, error: error.message, cleanupMessage: null });
+  }
+});
+
+app.post('/generate-excel', (req, res) => {
+  try {
+    let jsonData = JSON.parse(req.body.jsonData);
+    if (!Array.isArray(jsonData)) jsonData = [jsonData];
+
+    const workbook = XLSX.utils.book_new();
+    const globalStructureMap = new Map();
+
+    const mainData = jsonData.map(item => {
+      const processedItem = {};
+      const parentId = item.id || crypto.randomUUID().slice(-8);
+
+      Object.entries(item).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          processedItem[`${key}_ref`] = processNestedData(
+            value,
+            key,
+            [],
+            parentId,
+            workbook,
+            globalStructureMap
+          );
+        } else if (typeof value === 'object' && value !== null) {
+          Object.entries(value).forEach(([subKey, subValue]) => {
+            processedItem[`${key}_${subKey}`] = subValue;
+          });
+        } else {
+          processedItem[key] = value;
+        }
+      });
+
+      return processedItem;
+    });
+
+    const mainWorksheet = XLSX.utils.json_to_sheet(mainData);
+    XLSX.utils.book_append_sheet(workbook, mainWorksheet, "MainData");
+
+    // 文件生成和下载
+    const fileName = `export-${Date.now()}.xlsx`;
+    const filePath = path.join(__dirname, 'temp', fileName);
+
+    if (!fs.existsSync(path.join(__dirname, 'temp'))) {
+      fs.mkdirSync(path.join(__dirname, 'temp'));
+    }
+
+    XLSX.writeFile(workbook, filePath);
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
+
+    fs.createReadStream(filePath)
+      .pipe(res)
+      .on('finish', () => fs.unlinkSync(filePath));
+
+  } catch (error) {
     res.render('index', {
-      jsonData: null,
-      error: error.message,      
+      jsonData: req.body.jsonData,
+      error: `生成Excel失败: ${error.message}`,
       cleanupMessage: null
     });
   }
 });
 
-// 在路由配置部分添加清理路由
-// app.post('/cleanup', async (req, res) => {
-//   try {
-//     const uploadDir = path.join(__dirname, 'uploads');
-
-//     // 检查目录是否存在
-//     if (!fs.existsSync(uploadDir)) {
-//       return res.render('index', {
-//         jsonData: null,
-//         error: null,
-//         cleanupMessage: '上传目录不存在，无需清理'
-//       });
-//     }
-
-//     // 获取所有文件
-//     const files = await readdir(uploadDir);
-
-//     // 删除所有文件
-//     await Promise.all(files.map(file =>
-//       unlink(path.join(uploadDir, file))
-//     ));
-
-//     // 可选：删除空目录
-//     // await rmdir(uploadDir);
-
-//     res.render('index', {
-//       jsonData: null,
-//       error: null,
-//       cleanupMessage: `成功清理 ${files.length} 个临时文件`
-//     });
-//   } catch (error) {
-//     res.render('index', {
-//       jsonData: null,
-//       error: null,
-//       cleanupMessage: `清理失败: ${error.message}`
-//     });
-//   }
-// });
-
+// 服务器启动 --------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+  if (!fs.existsSync('temp')) fs.mkdirSync('temp');
 });

@@ -6,6 +6,135 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Excel转JSON转换器</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .json-editor-container {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+
+        .json-textarea {
+            width: 100%;
+            height: 300px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            border: 2px solid #ccc;
+            border-radius: 4px;
+            resize: vertical;
+            tab-size: 2;
+        }
+
+        .validation-status {
+            margin-top: 5px;
+            font-size: 14px;
+        }
+
+        .button-group {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-format,
+        .btn-validate,
+        .btn-convert {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .btn-format {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-validate {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-convert {
+            background: #FF9800;
+            color: white;
+        }
+
+        .btn-format:hover {
+            background: #45a049;
+        }
+
+        .btn-validate:hover {
+            background: #1976D2;
+        }
+
+        .btn-convert:hover {
+            background: #FB8C00;
+        }
+
+        .error-message {
+            color: #d32f2f;
+            margin: 10px 0;
+            padding: 10px;
+            background: #ffebee;
+            border-radius: 4px;
+            display: none;
+        }
+    </style>
+    <script>
+        // 实时验证JSON格式
+        document.getElementById('jsonInput').addEventListener('input', function (e) {
+            validateJSON(true);
+        });
+
+        // 格式化JSON
+        function formatJSON() {
+            try {
+                const input = document.getElementById('jsonInput').value;
+                const parsed = JSON.parse(input);
+                document.getElementById('jsonInput').value = JSON.stringify(parsed, null, 2);
+                showError(''); // 清除错误提示
+            } catch (error) {
+                showError(`格式化失败: ${error.message}`);
+            }
+        }
+
+        // 验证JSON有效性
+        function validateJSON(silent = false) {
+            try {
+                JSON.parse(document.getElementById('jsonInput').value);
+                document.getElementById('validationStatus').innerHTML =
+                    '<span style="color: #4CAF50;">✓ JSON格式正确</span>';
+                return true;
+            } catch (error) {
+                if (!silent) showError(`验证失败: ${error.message}`);
+                document.getElementById('validationStatus').innerHTML =
+                    '<span style="color: #d32f2f;">✗ JSON格式错误</span>';
+                return false;
+            }
+        }
+
+        // 提交前处理
+        function prepareSubmit() {
+            if (!validateJSON()) {
+                showError('请先修复JSON格式错误');
+                return false;
+            }
+            // 将格式化后的JSON存入隐藏字段
+            document.getElementById('hiddenJsonData').value =
+                document.getElementById('jsonInput').value;
+            return true;
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            const container = document.getElementById('errorMessage');
+            container.textContent = message;
+            container.style.display = message ? 'block' : 'none';
+        }
+    </script>
 </head>
 
 <body class="bg-light">
@@ -47,6 +176,52 @@
                             </div>
                             <% } %>
     </div>
+
+    <!-- 添加文件上传按钮 -->
+    <input type="file" id="jsonFileUpload" accept=".json" style="display: none;">
+    <button onclick="document.getElementById('jsonFileUpload').click()" class="btn-upload">
+        上传JSON文件
+    </button>
+
+    <script>
+        // 文件上传处理
+        document.getElementById('jsonFileUpload').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                document.getElementById('jsonInput').value = e.target.result;
+                validateJSON();
+            };
+            reader.readAsText(file);
+        });
+    </script>
+    <div class="json-editor-container">
+        <h3>输入JSON数据</h3>
+
+        <!-- JSON输入区域 -->
+        <div class="input-group">
+            <textarea id="jsonInput" class="json-textarea" placeholder="支持以下格式：
+    1. 数组格式（推荐）: [{...}, {...}]
+    2. 单对象格式: {...}" spellcheck="false"></textarea>
+            <div class="validation-status" id="validationStatus"></div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="button-group">
+            <button onclick="formatJSON()" class="btn-format">格式化</button>
+            <button onclick="validateJSON()" class="btn-validate">验证</button>
+            <form action="/generate-excel" method="post" enctype="application/x-www-form-urlencoded"
+                onsubmit="return prepareSubmit()">
+                <input type="hidden" name="jsonData" id="hiddenJsonData">
+                <button type="submit" class="btn-convert">生成Excel</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 错误提示容器 -->
+    <div id="errorMessage" class="error-message"></div>
 </body>
 
 </html>
