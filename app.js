@@ -98,7 +98,7 @@ const processNestedData = (data, fieldName, parentId, workbook, globalStructureM
   return sheetName;
 };
 
-// 文件上传配置
+// 文件上传配置 - 统一使用uploads目录
 const storage = multer.diskStorage({
   destination: 'uploads/',
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
@@ -108,9 +108,15 @@ const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    file.mimetype.includes('excel') || file.mimetype.includes('spreadsheetml') 
-      ? cb(null, true) 
-      : cb(new Error('请上传Excel文件'));
+    const allowedTypes = [
+      'application/json',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel'
+    ];
+    
+    allowedTypes.includes(file.mimetype)
+      ? cb(null, true)
+      : cb(new Error('请上传JSON或Excel文件'));
   }
 });
 
@@ -231,7 +237,24 @@ const parseGenericExcel = (workbook) => {
   return buildNestedStructure(sheetData[mainSheet], relations, mainSheet);
 };
 
-
+// 清理上传目录
+const cleanupUploads = async () => {
+  try {
+    const files = await promisify(fs.readdir)('uploads');
+    const now = Date.now();
+    
+    for (const file of files) {
+      const filePath = path.join('uploads', file);
+      const stats = await promisify(fs.stat)(filePath);
+      // 删除超过1小时的文件
+      if (now - stats.mtimeMs > 3600000) {
+        await promisify(fs.unlink)(filePath);
+      }
+    }
+  } catch (error) {
+    console.error('清理上传目录失败:', error);
+  }
+};
 
 // 路由配置
 app.get('/', (req, res) => res.render('index', { jsonData: null, error: null, cleanupMessage: null }));
@@ -240,22 +263,44 @@ app.post('/upload', upload.single('excelFile'), async (req, res) => {
   try {
     if (!req.file) throw new Error('请选择要上传的文件');
 
-    const workbook = XLSX.readFile(req.file.path);
-    const jsonData = parseGenericExcel(workbook);
+    let jsonData;
+    if (req.file.mimetype === 'application/json') {
+      // 处理JSON文件
+      const fileContent = await promisify(fs.readFile)(req.file.path, 'utf8');
+      jsonData = JSON.parse(fileContent);
+    } else {
+      // 处理Excel文件
+      const workbook = XLSX.readFile(req.file.path);
+      jsonData = parseGenericExcel(workbook);
+    }
 
+    // 上传后立即删除文件
     await promisify(fs.unlink)(req.file.path);
 
     res.render('index', {
       jsonData: JSON.stringify(jsonData, null, 2),
       error: null,
-      cleanupMessage: '文件已自动清理'
+      cleanupMessage: '上传文件已自动清理'
     });
   } catch (error) {
-    res.render('index', { jsonData: null, error: error.message, cleanupMessage: null });
+    // 出错时也尝试删除文件
+    if (req.file) {
+      try {
+        await promisify(fs.unlink)(req.file.path);
+      } catch (cleanupError) {
+        console.error('清理上传文件失败:', cleanupError);
+      }
+    }
+    
+    res.render('index', { 
+      jsonData: null, 
+      error: error.message, 
+      cleanupMessage: '上传文件已自动清理'
+    });
   }
 });
 
-app.post('/generate-excel', (req, res) => {
+app.post('/generate-excel', async (req, res) => {
   try {
     let jsonData = JSON.parse(req.body.jsonData);
     if (!Array.isArray(jsonData)) jsonData = [jsonData];
@@ -289,20 +334,23 @@ app.post('/generate-excel', (req, res) => {
     XLSX.utils.book_append_sheet(workbook, mainWorksheet, "MainData");
 
     const fileName = `export-${Date.now()}.xlsx`;
-    const filePath = path.join(__dirname, 'temp', fileName);
-
-    if (!fs.existsSync(path.join(__dirname, 'temp'))) {
-      fs.mkdirSync(path.join(__dirname, 'temp'));
-    }
+    const filePath = path.join(__dirname, 'uploads', fileName);
 
     XLSX.writeFile(workbook, filePath);
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
 
-    fs.createReadStream(filePath)
-      .pipe(res)
-      .on('finish', () => fs.unlinkSync(filePath));
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+    
+    fileStream.on('end', async () => {
+      try {
+        await promisify(fs.unlink)(filePath);
+      } catch (error) {
+        console.error('删除临时Excel文件失败:', error);
+      }
+    });
 
   } catch (error) {
     res.render('index', {
@@ -315,8 +363,15 @@ app.post('/generate-excel', (req, res) => {
 
 // 服务器启动
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  
+  // 创建必要的目录
   if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
-  if (!fs.existsSync('temp')) fs.mkdirSync('temp');
+  
+  // 启动时清理旧文件
+  await cleanupUploads();
+  
+  // 每小时清理一次上传目录
+  setInterval(cleanupUploads, 3600000);
 });
