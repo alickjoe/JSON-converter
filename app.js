@@ -173,6 +173,65 @@ const upload = multer({
   }
 });
 
+// 在文件顶部常量声明之后添加这个新函数
+const parseMultiTabExcel = (workbook) => {
+  const sheets = workbook.SheetNames;
+  const result = {};
+  const relations = {};
+  // 收集所有工作表数据
+  sheets.forEach(sheetName => {
+    const worksheet = workbook.Sheets[sheetName];
+    result[sheetName] = XLSX.utils.sheet_to_json(worksheet);
+    
+    // 检测关系（通过 parent_id 字段）
+    if (result[sheetName].length > 0 && 'parent_id' in result[sheetName][0]) {
+      relations[sheetName] = {
+        parentField: 'parent_id',
+        childField: sheetName.replace(/_\w+$/, '') // 移除哈希后缀获取字段名
+      };
+    }
+  });
+  // 构建嵌套结构
+  const buildNested = (parentItems, relations) => {
+    return parentItems.map(parent => {
+      const nested = { ...parent };
+      
+      // 查找所有子表关系
+      Object.entries(relations).forEach(([sheetName, relation]) => {
+        const children = result[sheetName].filter(
+          child => child[relation.parentField] === parent.id || 
+                  child[relation.parentField] === parent._generated_id
+        );
+        
+        if (children.length > 0) {
+          // 处理子项
+          nested[relation.childField] = children.map(child => {
+            const childCopy = { ...child };
+            delete childCopy[relation.parentField]; // 移除 parent_id
+            
+            // 递归处理更深层次的嵌套
+            const hasNested = Object.keys(relations).some(
+              s => s !== sheetName && result[s][0]?.parent_id === child.id
+            );
+            
+            return hasNested ? buildNested([childCopy], relations)[0] : childCopy;
+          });
+        }
+      });
+      
+      return nested;
+    });
+  };
+  // 确定根表并构建结构
+  const rootSheets = sheets.filter(sheet => 
+    !Object.values(relations).some(r => r.childField === sheet.replace(/_\w+$/, ''))
+  );
+  
+  return rootSheets.length > 0 
+    ? buildNested(result[rootSheets[0]], relations) 
+    : result;
+};
+
 // 路由配置 -----------------------------------------------------
 app.get('/', (req, res) => {
   res.render('index', { jsonData: null, error: null, cleanupMessage: null });
@@ -183,7 +242,7 @@ app.post('/upload', upload.single('excelFile'), async (req, res) => {
     if (!req.file) throw new Error('请选择要上传的文件');
 
     const workbook = XLSX.readFile(req.file.path);
-    const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+    const jsonData = parseMultiTabExcel(workbook);
 
     await promisify(fs.unlink)(req.file.path);
 
