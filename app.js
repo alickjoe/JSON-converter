@@ -173,25 +173,41 @@ const upload = multer({
   }
 });
 
-// 在文件顶部常量声明之后添加这个新函数
+// 修改后的解析函数，处理只有parent_id和value列的情况
 const parseMultiTabExcel = (workbook) => {
   const sheets = workbook.SheetNames;
   const result = {};
   const relations = {};
-  // 收集所有工作表数据
+  
+  // 第一阶段：收集所有工作表数据并识别关系
   sheets.forEach(sheetName => {
     const worksheet = workbook.Sheets[sheetName];
-    result[sheetName] = XLSX.utils.sheet_to_json(worksheet);
+    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+    result[sheetName] = jsonData;
     
     // 检测关系（通过 parent_id 字段）
-    if (result[sheetName].length > 0 && 'parent_id' in result[sheetName][0]) {
-      relations[sheetName] = {
-        parentField: 'parent_id',
-        childField: sheetName.replace(/_\w+$/, '') // 移除哈希后缀获取字段名
-      };
+    if (jsonData.length > 0) {
+      const firstRow = jsonData[0];
+      const columns = Object.keys(firstRow);
+      
+      // 如果是只有parent_id和value的特殊表
+      if (columns.length === 2 && columns.includes('parent_id') && columns.includes('value')) {
+        relations[sheetName] = {
+          parentField: 'parent_id',
+          childField: sheetName.replace(/_\w+$/, ''), // 移除哈希后缀获取字段名
+          isValueOnly: true
+        };
+      } else if ('parent_id' in firstRow) {
+        relations[sheetName] = {
+          parentField: 'parent_id',
+          childField: sheetName.replace(/_\w+$/, ''),
+          isValueOnly: false
+        };
+      }
     }
   });
-  // 构建嵌套结构
+
+  // 第二阶段：构建嵌套结构
   const buildNested = (parentItems, relations) => {
     return parentItems.map(parent => {
       const nested = { ...parent };
@@ -204,25 +220,31 @@ const parseMultiTabExcel = (workbook) => {
         );
         
         if (children.length > 0) {
-          // 处理子项
-          nested[relation.childField] = children.map(child => {
-            const childCopy = { ...child };
-            delete childCopy[relation.parentField]; // 移除 parent_id
-            
-            // 递归处理更深层次的嵌套
-            const hasNested = Object.keys(relations).some(
-              s => s !== sheetName && result[s][0]?.parent_id === child.id
-            );
-            
-            return hasNested ? buildNested([childCopy], relations)[0] : childCopy;
-          });
+          // 处理只有value的特殊表
+          if (relation.isValueOnly) {
+            nested[relation.childField] = children.map(child => child.value);
+          } else {
+            // 处理普通表
+            nested[relation.childField] = children.map(child => {
+              const childCopy = { ...child };
+              delete childCopy[relation.parentField]; // 移除 parent_id
+              
+              // 递归处理更深层次的嵌套
+              const hasNested = Object.keys(relations).some(
+                s => s !== sheetName && result[s][0]?.parent_id === child.id
+              );
+              
+              return hasNested ? buildNested([childCopy], relations)[0] : childCopy;
+            });
+          }
         }
       });
       
       return nested;
     });
   };
-  // 确定根表并构建结构
+  
+  // 第三阶段：确定根表并构建结构
   const rootSheets = sheets.filter(sheet => 
     !Object.values(relations).some(r => r.childField === sheet.replace(/_\w+$/, ''))
   );
