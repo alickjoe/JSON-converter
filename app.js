@@ -25,17 +25,33 @@ const getStructureHash = (obj) => {
     return crypto.createHash('md5').update('primitive_array').digest('hex').slice(0,6);
   }
 
-  const hashKeys = (obj) => {
-    if (Array.isArray(obj)) return obj.map(hashKeys);
-    if (typeof obj === 'object' && obj !== null) {
-      return Object.keys(obj).sort().reduce((acc, key) => {
-        acc[key] = hashKeys(obj[key]);
-        return acc;
-      }, {});
-    }
-    return typeof obj;
-  };
-  return crypto.createHash('md5').update(JSON.stringify(hashKeys(obj))).digest('hex').slice(0, 6);
+  // 处理空数组/对象
+  if ((Array.isArray(obj) && obj.length === 0) || (typeof obj === 'object' && obj !== null && Object.keys(obj).length === 0)) {
+    return crypto.createHash('md5').update('empty').digest('hex').slice(0,6);
+  }
+
+  // 处理对象数组
+  if (Array.isArray(obj) && typeof obj[0] === 'object') {
+    const sample = obj[0];
+    const keys = Object.keys(sample).sort();
+    const types = keys.map(key => typeof sample[key]);
+    return crypto.createHash('md5')
+      .update(JSON.stringify({ keys, types }))
+      .digest('hex')
+      .slice(0, 6);
+  }
+
+  // 处理单个对象
+  if (typeof obj === 'object' && obj !== null) {
+    const keys = Object.keys(obj).sort();
+    const types = keys.map(key => typeof obj[key]);
+    return crypto.createHash('md5')
+      .update(JSON.stringify({ keys, types }))
+      .digest('hex')
+      .slice(0, 6);
+  }
+
+  return crypto.createHash('md5').update(typeof obj).digest('hex').slice(0,6);
 };
 
 // 优化后的工作表命名逻辑
@@ -51,7 +67,7 @@ const processNestedData = (data, fieldName, parentSheetNames, parentId, workbook
   if (!data || data.length === 0) return '';
 
   // 处理基本类型数组（字符串/数字等）
-  const isPrimitiveArray = typeof data[0] !== 'object' && !Array.isArray(data[0]);
+  const isPrimitiveArray = Array.isArray(data) && data.some(item => typeof item !== 'object');
   if (isPrimitiveArray) {
     const structureHash = getStructureHash(data);
     const sheetName = generateSheetName(fieldName, structureHash);
@@ -87,8 +103,11 @@ const processNestedData = (data, fieldName, parentSheetNames, parentId, workbook
   const sheetName = generateSheetName(fieldName, structureHash);
 
   if (!globalStructureMap.has(sheetName)) {
+    // 使用第一个对象的键作为表头
+    const headers = Object.keys(data[0]).sort();
+    const worksheet = XLSX.utils.json_to_sheet([], { header: ['parent_id', ...headers] });
     globalStructureMap.set(sheetName, {
-      worksheet: XLSX.utils.json_to_sheet([]),
+      worksheet,
       data: []
     });
   }
@@ -119,7 +138,10 @@ const processNestedData = (data, fieldName, parentSheetNames, parentId, workbook
     });
 
     currentSheet.data.push(row);
-    XLSX.utils.sheet_add_json(currentSheet.worksheet, currentSheet.data);
+    XLSX.utils.sheet_add_json(currentSheet.worksheet, [row], {
+      skipHeader: true,
+      origin: -1
+    });
   });
 
   if (!workbook.Sheets[sheetName]) {
@@ -187,19 +209,17 @@ app.post('/generate-excel', (req, res) => {
       idMap.set(index, parentId);
 
       const processedItem = {
-        _generated_id: parentId, // 将生成的ID存入主表
-        location_id: item.location_id,
-        evse_uid: item.evse_uid,
-        connector_id: item.connector_id
+        _generated_id: parentId // 将生成的ID存入主表
       };
 
+      // 处理所有属性，不再排除特定字段
       Object.entries(item).forEach(([key, value]) => {
         if (Array.isArray(value)) {
           processedItem[`${key}_ref`] = processNestedData(
             value,
             key,
             [],
-            parentId, // 使用相同的parentId
+            parentId,
             workbook,
             globalStructureMap
           );
@@ -207,7 +227,7 @@ app.post('/generate-excel', (req, res) => {
           Object.entries(value).forEach(([subKey, subValue]) => {
             processedItem[`${key}_${subKey}`] = subValue;
           });
-        } else if (!['location_id', 'evse_uid', 'connector_id'].includes(key)) {
+        } else {
           processedItem[key] = value;
         }
       });
