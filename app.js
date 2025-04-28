@@ -7,9 +7,11 @@ const { promisify } = require('util');
 const crypto = require('crypto');
 const app = express();
 
+// 增加请求体大小限制配置
+app.use(express.json({ limit: '50mb' }));  // 增加到50MB
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));  // 增加到50MB
+
 // 中间件配置
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 
@@ -161,6 +163,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 增加文件大小限制到50MB
   fileFilter: (req, file, cb) => {
     if (file.mimetype.includes('excel') || file.mimetype.includes('spreadsheetml')) {
       cb(null, true);
