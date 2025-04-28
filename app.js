@@ -179,10 +179,19 @@ app.post('/generate-excel', (req, res) => {
 
     const workbook = XLSX.utils.book_new();
     const globalStructureMap = new Map();
+    const idMap = new Map(); // 新增：用于存储生成的ID映射
 
-    const mainData = jsonData.map(item => {
-      const processedItem = {};
-      const parentId = item.id || crypto.randomUUID().slice(-8);
+    const mainData = jsonData.map((item, index) => {
+      // 生成唯一ID并保存映射关系
+      const parentId = item.id || `rec_${crypto.randomBytes(4).toString('hex')}`;
+      idMap.set(index, parentId);
+
+      const processedItem = {
+        _generated_id: parentId, // 将生成的ID存入主表
+        location_id: item.location_id,
+        evse_uid: item.evse_uid,
+        connector_id: item.connector_id
+      };
 
       Object.entries(item).forEach(([key, value]) => {
         if (Array.isArray(value)) {
@@ -190,7 +199,7 @@ app.post('/generate-excel', (req, res) => {
             value,
             key,
             [],
-            parentId,
+            parentId, // 使用相同的parentId
             workbook,
             globalStructureMap
           );
@@ -198,7 +207,7 @@ app.post('/generate-excel', (req, res) => {
           Object.entries(value).forEach(([subKey, subValue]) => {
             processedItem[`${key}_${subKey}`] = subValue;
           });
-        } else {
+        } else if (!['location_id', 'evse_uid', 'connector_id'].includes(key)) {
           processedItem[key] = value;
         }
       });

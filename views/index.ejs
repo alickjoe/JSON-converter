@@ -83,10 +83,99 @@
             display: none;
         }
     </style>
+</head>
+
+<body class="bg-light">
+    <div class="container mt-5">
+        <h1 class="mb-4">Excel转JSON转换器</h1>
+
+        <% if (error) { %>
+            <div class="alert alert-danger">
+                <%= error %>
+            </div>
+            <% } %>
+
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <form action="/upload" method="post" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="excelFile" class="form-label">选择Excel文件</label>
+                                <input type="file" class="form-control" name="excelFile" id="excelFile"
+                                    accept=".xls,.xlsx">
+                            </div>
+                            <button type="submit" class="btn btn-primary">转换</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- 在结果显示区域上方添加清理信息显示 -->
+                <% if (cleanupMessage) { %>
+                    <div class="alert alert-info mt-3">
+                        <%= cleanupMessage %>
+                    </div>
+                    <% } %>
+
+                        <% if (jsonData) { %>
+                            <div class="card">
+                                <div class="card-header">转换结果</div>
+                                <div class="card-body">
+                                    <pre><code class="language-json"><%= jsonData %></code></pre>
+                                </div>
+                            </div>
+                            <% } %>
+
+    <div class="json-editor-container">
+        <h3>输入JSON数据</h3>
+
+        <!-- JSON输入区域 -->
+        <div class="input-group">
+            <textarea id="jsonInput" class="json-textarea" placeholder="支持以下格式：
+    1. 数组格式（推荐）: [{...}, {...}]
+    2. 单对象格式: {...}" spellcheck="false"></textarea>
+            <div class="validation-status" id="validationStatus"></div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="button-group">
+            <button onclick="formatJSON()" class="btn-format">格式化</button>
+            <button onclick="validateJSON()" class="btn-validate">验证</button>
+            <form action="/generate-excel" method="post" enctype="application/x-www-form-urlencoded"
+                onsubmit="return prepareSubmit()">
+                <input type="hidden" name="jsonData" id="hiddenJsonData">
+                <button type="submit" class="btn-convert">生成Excel</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 错误提示容器 -->
+    <div id="errorMessage" class="error-message"></div>
+
+    <!-- 添加文件上传按钮 -->
+    <input type="file" id="jsonFileUpload" accept=".json" style="display: none;">
+    <button onclick="document.getElementById('jsonFileUpload').click()" class="btn-upload">
+        上传JSON文件
+    </button>
+
     <script>
-        // 实时验证JSON格式
-        document.getElementById('jsonInput').addEventListener('input', function (e) {
-            validateJSON(true);
+        // 等待DOM完全加载
+        document.addEventListener('DOMContentLoaded', function() {
+            // 实时验证JSON格式
+            document.getElementById('jsonInput').addEventListener('input', function (e) {
+                validateJSON(true);
+            });
+
+            // 文件上传处理
+            document.getElementById('jsonFileUpload').addEventListener('change', function (e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    document.getElementById('jsonInput').value = e.target.result;
+                    validateJSON();
+                };
+                reader.readAsText(file);
+            });
         });
 
         // 格式化JSON
@@ -135,93 +224,6 @@
             container.style.display = message ? 'block' : 'none';
         }
     </script>
-</head>
-
-<body class="bg-light">
-    <div class="container mt-5">
-        <h1 class="mb-4">Excel转JSON转换器</h1>
-
-        <% if (error) { %>
-            <div class="alert alert-danger">
-                <%= error %>
-            </div>
-            <% } %>
-
-                <div class="card mb-4">
-                    <div class="card-body">
-                        <form action="/upload" method="post" enctype="multipart/form-data">
-                            <div class="mb-3">
-                                <label for="excelFile" class="form-label">选择Excel文件</label>
-                                <input type="file" class="form-control" name="excelFile" id="excelFile"
-                                    accept=".xls,.xlsx">
-                            </div>
-                            <button type="submit" class="btn btn-primary">转换</button>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- 在结果显示区域上方添加清理信息显示 -->
-                <% if (cleanupMessage) { %>
-                    <div class="alert alert-info mt-3">
-                        <%= cleanupMessage %>
-                    </div>
-                    <% } %>
-
-                        <% if (jsonData) { %>
-                            <div class="card">
-                                <div class="card-header">转换结果</div>
-                                <div class="card-body">
-                                    <pre><code class="language-json"><%= jsonData %></code></pre>
-                                </div>
-                            </div>
-                            <% } %>
-    </div>
-
-    <!-- 添加文件上传按钮 -->
-    <input type="file" id="jsonFileUpload" accept=".json" style="display: none;">
-    <button onclick="document.getElementById('jsonFileUpload').click()" class="btn-upload">
-        上传JSON文件
-    </button>
-
-    <script>
-        // 文件上传处理
-        document.getElementById('jsonFileUpload').addEventListener('change', function (e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function (e) {
-                document.getElementById('jsonInput').value = e.target.result;
-                validateJSON();
-            };
-            reader.readAsText(file);
-        });
-    </script>
-    <div class="json-editor-container">
-        <h3>输入JSON数据</h3>
-
-        <!-- JSON输入区域 -->
-        <div class="input-group">
-            <textarea id="jsonInput" class="json-textarea" placeholder="支持以下格式：
-    1. 数组格式（推荐）: [{...}, {...}]
-    2. 单对象格式: {...}" spellcheck="false"></textarea>
-            <div class="validation-status" id="validationStatus"></div>
-        </div>
-
-        <!-- 操作按钮 -->
-        <div class="button-group">
-            <button onclick="formatJSON()" class="btn-format">格式化</button>
-            <button onclick="validateJSON()" class="btn-validate">验证</button>
-            <form action="/generate-excel" method="post" enctype="application/x-www-form-urlencoded"
-                onsubmit="return prepareSubmit()">
-                <input type="hidden" name="jsonData" id="hiddenJsonData">
-                <button type="submit" class="btn-convert">生成Excel</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- 错误提示容器 -->
-    <div id="errorMessage" class="error-message"></div>
 </body>
 
 </html>
