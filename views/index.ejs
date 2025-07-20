@@ -35,16 +35,26 @@
             margin-top: 15px;
             display: flex;
             gap: 10px;
+            align-items: stretch;
         }
 
-        .btn-format,
-        .btn-validate,
-        .btn-convert {
-            padding: 8px 16px;
+        .btn-form {
+            width: 180px;
             border: none;
-            border-radius: 4px;
+            padding: 0;
+            margin: 0;
+            display: inline-block;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
             cursor: pointer;
-            transition: background 0.3s;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            font-weight: 500;
+    width: 180px;
         }
 
         .btn-format {
@@ -62,16 +72,33 @@
             color: white;
         }
 
+        .btn-upload {
+            background: #9C27B0;
+            color: white;
+        }
+
         .btn-format:hover {
-            background: #45a049;
+            background: #3d8b40;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
 
         .btn-validate:hover {
-            background: #1976D2;
+            background: #1565C0;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
 
         .btn-convert:hover {
-            background: #FB8C00;
+            background: #F57C00;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .btn-upload:hover {
+            background: #7B1FA2;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
 
         .error-message {
@@ -103,7 +130,7 @@
                                 <input type="file" class="form-control" name="excelFile" id="excelFile"
                                     accept=".xls,.xlsx">
                             </div>
-                            <button type="submit" class="btn btn-primary">转换</button>
+                            <button type="submit" class="btn btn-convert">转换</button>
                         </form>
                     </div>
                 </div>
@@ -136,14 +163,11 @@
         </div>
 
         <!-- 操作按钮 -->
+        <input type="hidden" name="jsonData" id="hiddenJsonData">
         <div class="button-group">
-            <button onclick="formatJSON()" class="btn-format">格式化</button>
-            <button onclick="validateJSON()" class="btn-validate">验证</button>
-            <form action="/generate-excel" method="post" enctype="application/x-www-form-urlencoded"
-                onsubmit="return prepareSubmit()">
-                <input type="hidden" name="jsonData" id="hiddenJsonData">
-                <button type="submit" class="btn-convert">生成Excel</button>
-            </form>
+            <button onclick="formatJSON()" class="btn btn-format">格式化</button>
+            <button onclick="validateJSON()" class="btn btn-validate">验证</button>
+            <button onclick="submitExcelForm()" class="btn btn-convert">生成Excel</button>
         </div>
     </div>
 
@@ -152,7 +176,7 @@
 
     <!-- 添加文件上传按钮 -->
     <input type="file" id="jsonFileUpload" accept=".json" style="display: none;">
-    <button onclick="document.getElementById('jsonFileUpload').click()" class="btn-upload">
+    <button onclick="document.getElementById('jsonFileUpload').click()" class="btn btn-upload">
         上传JSON文件
     </button>
 
@@ -191,6 +215,22 @@
         }
 
         // 验证JSON有效性
+        function submitExcelForm() {
+            const jsonInput = document.getElementById('jsonInput').value;
+            if (!validateJSON(true)) {
+                showError('请先输入有效的JSON数据');
+                return;
+            }
+            document.getElementById('hiddenJsonData').value = jsonInput;
+            const form = document.createElement('form');
+            form.method = 'post';
+            form.action = '/generate-excel';
+            form.style.display = 'none';
+            form.appendChild(document.getElementById('hiddenJsonData'));
+            document.body.appendChild(form);
+            form.submit();
+        }
+
         function validateJSON(silent = false) {
             try {
                 JSON.parse(document.getElementById('jsonInput').value);
