@@ -1,0 +1,16 @@
+networks:
+  aznetwork:
+    name: mynetwork
+    external: true
+
+services:
+  daed:
+    image: alickjoe/json-converter:latest
+    container_name: json-converter
+    networks: 
+      aznetwork:
+        aliases:
+          - dajson-convertered
+    restart: always
+    ports:
+      - "3000:3000/tcp"
